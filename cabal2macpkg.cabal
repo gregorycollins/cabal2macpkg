@@ -1,0 +1,29 @@
+name:               cabal2macpkg
+version:            0.1
+homepage:           http://gregorycollins.net/
+synopsis:           Create OSX installation packages from Cabal packages
+description:        Create OSX installation packages from Cabal packages
+category:           Distribution
+license:            BSD3
+license-file:       LICENSE
+author:             Gregory D. Collins
+maintainer:         greg@gregorycollins.net
+cabal-version:      >= 1.6
+build-type:         Simple
+
+executable cabal2macpkg
+    main-is:            Main.hs
+    ghc-options:        -Wall
+
+    build-depends:      
+            base >= 3,
+            pretty,
+            process,
+            directory,
+            containers,
+            bytestring,
+            Cabal >= 1.6,
+            pureMD5 >= 0.2.1,
+            filepath,
+            unix
+
