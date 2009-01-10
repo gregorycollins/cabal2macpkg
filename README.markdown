@@ -27,9 +27,11 @@ TODO/Requirements
 -----------------
 
 First round:
+
 * get it generating a .pkg file for an individual cabal library
 * .pkg contents should be installable into any given prefix
 
 Next round:
+
 * Get it building a .mpkg metapackage from the haskell platform
   toplevel project
