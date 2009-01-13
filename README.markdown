@@ -21,17 +21,3 @@ I've gotten up to number three here.
 A consequence of this quick n' dirty approach is that in order to
 build the installer for a cabal package, you need to have already
 installed all of its dependencies on the build machine.
-
-
-TODO/Requirements
------------------
-
-First round:
-
-* get it generating a .pkg file for an individual cabal library
-* .pkg contents should be installable into any given prefix
-
-Next round:
-
-* Get it building a .mpkg metapackage from the haskell platform
-  toplevel project
