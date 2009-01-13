@@ -5,7 +5,7 @@
 --
 -- Maintainer: greg@gregorycollins.net
 -- Stability : early stage project
--- 
+--
 -- Loosely based on cabal2arch by Don Stewart.
 --
 -- Rough outline of the process:
@@ -43,7 +43,10 @@ import Data.Monoid
 import Data.Char
 import Debug.Trace
 
+import qualified System.Console.GetOpt as GetOpt
+
 import System.Directory
+import System.Environment (getArgs)
 import System.Exit
 import System.FilePath
 import System.IO
@@ -52,25 +55,106 @@ import System.Process
 import System.Posix.User (getEffectiveUserName)
 
 
+
 main :: IO ()
 main = do
-  bracket getTempDirectory cleanupTempDirectory runMain
+  options <- getOptions
+  bracket getTempDirectory
+          cleanupTempDirectory
+          (runMain options)
 
 
-runMain :: String -> IO ()
-runMain tmpdir = do
-  findPackageDesc "." >>= makeMacPkg tmpdir
+
+runMain :: Options -> String -> IO ()
+runMain options tmpdir = do
+  findPackageDesc "." >>= makeMacPkg options tmpdir
 
 
-whoami :: IO String
-whoami = getEffectiveUserName
+
+------------------------------------------------------------------------
+-- program options
+------------------------------------------------------------------------
+data Options = Options {
+      installPrefix :: Maybe String,
+      showUsage     :: Bool
+    } deriving (Eq, Show)
 
 
-makeMacPkg :: FilePath -> FilePath -> IO ()
-makeMacPkg tmpdir cabalFile = do
+------------------------------------------------------------------------
+instance Monoid Options where
+    mempty = Options { installPrefix=Nothing, showUsage=False }
+    a `mappend` b =
+        Options {
+            installPrefix = ip,
+            showUsage = (showUsage a) || (showUsage b)
+          }
+      where
+        ipa = installPrefix a
+        ipb = installPrefix b
+        ip = if isJust ipb then ipb else ipa
+
+
+------------------------------------------------------------------------
+optionFlags = [ GetOpt.Option
+                  ['h']
+                  ["help"]
+                  (GetOpt.NoArg $ mempty {showUsage=True})
+                  "prints usage statement"
+              , GetOpt.Option
+                  []
+                  ["prefix"]
+                  (GetOpt.OptArg mkPrefix "DIR")
+                  "installation prefix directory" ]
+  where
+    mkPrefix :: Maybe String -> Options
+    mkPrefix m = mempty { installPrefix = m }
+
+
+------------------------------------------------------------------------
+usage :: [String] -> IO a
+usage errs = do
+  putStrLn $ (usageString header) ++ errstr
+  exitFailure
+
+  where
+    usageString :: String -> String
+    usageString = flip GetOpt.usageInfo $ optionFlags
+
+    preamble =
+        "cabal2macpkg is a tool to create OSX installer packages\
+        \ for cabal libraries"
+
+    usageLine = "Usage: cabal2macpkg [OPTION..]"
+
+    header = preamble ++ "\n\n" ++ usageLine
+                      ++ "\n" ++ (const '-' `map` usageLine) ++ "\n"
+
+    errstr = if null errs then ""
+             else "\n" ++ (concat errs)
+
+
+getOptions :: IO Options
+getOptions = do
+  args <- getArgs
+  opts <-
+      case GetOpt.getOpt GetOpt.RequireOrder optionFlags args of
+        (o,n,[])   -> return $ mconcat o
+        (_,_,errs) -> usage errs
+
+  if showUsage opts then usage [] else return opts
+
+------------------------------------------------------------------------
+-- end options stuff
+------------------------------------------------------------------------
+
+
+
+------------------------------------------------------------------------
+makeMacPkg :: Options -> FilePath -> FilePath -> IO ()
+makeMacPkg options tmpdir cabalFile = do
     -- some portions of package building process require root
     -- privileges
-    whoiam <- whoami
+    whoiam <- getEffectiveUserName
 
     if whoiam /= "root" then
         die "must be root to run cabal2macpkg"
@@ -81,16 +165,15 @@ makeMacPkg tmpdir cabalFile = do
     createDirectory stagingDir
     let buildFlags = defaultBuildFlags { buildDistPref = toFlag stagingDir }
     putStrLn $ "found a cabal file at '" ++ cabalFile ++ "'"
-    
+
     -- pkgDesc <- flattenPackageDescription $
     --              readPackageDescription Verbosity.normal
     --                                     cabalFile
-    
+
     pkgDesc <- flattenPackageDescription `liftM`
                  (readPackageDescription Verbosity.normal cabalFile)
 
-    let prefix = "/Library/Frameworks/GHC.framework/Versions/Current/usr"
-    
+    --------------------------------------------------------------------
     runSetup "configure" ["--global", "--prefix=" ++ prefix]
     runSetup "build"     []
     runSetup "haddock"   []
@@ -100,10 +183,14 @@ makeMacPkg tmpdir cabalFile = do
     copyFile "register.sh" $ tmpdir </> "register.sh"
     removeFile "register.sh"
 
-    --setRootPrivileges 
+    --setRootPrivileges
 
     putStrLn $ "tmpdir is " ++ tmpdir
+
   where
+    defaultInstallPath = "/usr/local"
+    prefix = fromMaybe defaultInstallPath $ installPrefix options
+
     cabalBuildDir = tmpdir </> "dist"
     stagingDir = tmpdir </> "stage"
 
@@ -114,12 +201,13 @@ makeMacPkg tmpdir cabalFile = do
     mkOpts s = s ++ ["--builddir=" ++ cabalBuildDir]
 
 
+------------------------------------------------------------------------
 -- |
 -- run a subprocess with the given arguments, ignoring the output. Die
 -- if the program returns an error.
 --
 runCmd :: String -> [String] -> IO ()
-runCmd cmd args = do 
+runCmd cmd args = do
   e <- rawSystem cmd args
   case e of ExitSuccess -> return ()
             ExitFailure _ -> die $ "command failed: " ++
@@ -127,6 +215,7 @@ runCmd cmd args = do
 
 
 
+------------------------------------------------------------------------
 -- |
 -- grab a temporary directory and change into it. Returns the path to
 -- the new directory and the path to the old working directory.
@@ -144,6 +233,8 @@ getTempDirectory =
          ExitFailure _ -> die $ "mktemp failed, saying '" ++ err ++ "'"
 
 
+
+------------------------------------------------------------------------
 -- |
 -- removes the temporary directory and returns back to the previous
 -- cwd
