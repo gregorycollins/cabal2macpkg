@@ -38,6 +38,7 @@ import Control.Concurrent
 import Control.Exception
 
 import Data.List
+import qualified Data.Map as Map
 import Data.Maybe
 import Data.Monoid
 import Data.Char
@@ -70,29 +71,99 @@ runMain options tmpdir = do
   findPackageDesc "." >>= makeMacPkg options tmpdir
 
 
+------------------------------------------------------------------------
+-- mac packageinfo files
+------------------------------------------------------------------------
+type PackageInfo = Map.Map String String
+
+
+-- I stole this stuff from some python code, documentation for the
+-- various file formats is difficult to find 
+packageInfoFields = [
+    "Title"
+  , "Version"
+  , "Description"
+  , "DefaultLocation"
+  , "DeleteWarning"
+  , "NeedsAuthorization"
+  , "DisableStop"
+  , "UseUserMask"
+  , "Application"
+  , "Relocatable"
+  , "Required"
+  , "InstallOnly"
+  , "RequiresReboot"
+  , "RootVolumeOnly"
+  , "LongFilenames"
+  , "LibrarySubdirectory"
+  , "AllowBackRev"
+  , "OverwritePermissions"
+  , "InstallFat"]
+
+
+packageInfoDefaults :: PackageInfo
+packageInfoDefaults = Map.fromList [
+                        ("Title"                , ""        )
+                      , ("Version"              , ""        )
+                      , ("Description"          , ""        )
+                      , ("DefaultLocation"      , "/"       )
+                      , ("DeleteWarning"        , ""        )
+                      , ("NeedsAuthorization"   , "NO"      )
+                      , ("DisableStop"          , "NO"      )
+                      , ("UseUserMask"          , "YES"     )
+                      , ("Application"          , "NO"      )
+                      , ("Relocatable"          , "YES"     )
+                      , ("Required"             , "NO"      )
+                      , ("InstallOnly"          , "NO"      )
+                      , ("RequiresReboot"       , "NO"      )
+                      , ("RootVolumeOnly"       , "NO"      )
+                      , ("InstallFat"           , "NO"      )
+                      , ("LongFilenames"        , "YES"     )
+                      , ("LibrarySubdirectory"  , "Standard")
+                      , ("AllowBackRev"         , "YES"     )
+                      , ("OverwritePermissions" , "NO"      )
+                      ]
+
+
+packageInfoToString :: PackageInfo -> String
+packageInfoToString pkg = e `concatMap` alist
+  where
+    alist = Map.toAscList pkg
+    e (k,v) = k ++ " " ++ v ++ "\n"
+
 
 ------------------------------------------------------------------------
 -- program options
 ------------------------------------------------------------------------
 data Options = Options {
-      installPrefix :: Maybe String,
-      showUsage     :: Bool
+      installPrefix    :: Maybe String,
+      packageMakerPath :: Maybe String,
+      showUsage        :: Bool
     } deriving (Eq, Show)
 
 
 ------------------------------------------------------------------------
 instance Monoid Options where
-    mempty = Options { installPrefix=Nothing, showUsage=False }
+    mempty = Options { installPrefix = Just "/usr/local"
+                     , showUsage = False
+                       -- TODO: allow packageMakerPath to be overridden
+                     , packageMakerPath = Just "/Developer/usr/bin/packagemaker"
+                     }
     a `mappend` b =
         Options {
-            installPrefix = ip,
-            showUsage = (showUsage a) || (showUsage b)
+            installPrefix = ip
+          , packageMakerPath = pmp
+          , showUsage = (showUsage a) || (showUsage b)
           }
       where
-        ipa = installPrefix a
-        ipb = installPrefix b
-        ip = if isJust ipb then ipb else ipa
+        ipa  = installPrefix a
+        ipb  = installPrefix b
 
+        pmpa = packageMakerPath a
+        pmpb = packageMakerPath b
+
+        ip  = if isJust ipb then ipb else ipa
+        pmp = if isJust pmpb then pmpb else pmpa
 
 ------------------------------------------------------------------------
 optionFlags = [ GetOpt.Option
@@ -150,6 +221,7 @@ getOptions = do
 
 
 ------------------------------------------------------------------------
+-- TODO: this function getting unwieldy, refactor
 makeMacPkg :: Options -> FilePath -> FilePath -> IO ()
 makeMacPkg options tmpdir cabalFile = do
     -- some portions of package building process require root
@@ -163,43 +235,82 @@ makeMacPkg options tmpdir cabalFile = do
 
     -- build into our temporary directory
     createDirectory stagingDir
-    let buildFlags = defaultBuildFlags { buildDistPref = toFlag stagingDir }
-    putStrLn $ "found a cabal file at '" ++ cabalFile ++ "'"
+    createDirectory scriptsDir
+    createDirectory contentsDir
 
-    -- pkgDesc <- flattenPackageDescription $
-    --              readPackageDescription Verbosity.normal
-    --                                     cabalFile
+    putStrLn $ "found a cabal file at '" ++ cabalFile ++ "'"
 
     pkgDesc <- flattenPackageDescription `liftM`
                  (readPackageDescription Verbosity.normal cabalFile)
+
+    let packageVersion = "0.0-FIXME"
 
     --------------------------------------------------------------------
     runSetup "configure" ["--global", "--prefix=" ++ prefix]
     runSetup "build"     []
     runSetup "haddock"   []
-    runSetup "copy"      ["--destdir=" ++ stagingDir]
+    runSetup "copy"      ["--destdir=" ++ contentsDir]
     runSetup "register"  ["--gen-script"]
 
-    copyFile "register.sh" $ tmpdir </> "register.sh"
+    copyFile "register.sh" $ postflightScriptFile
+    runCmd "chmod" ["+x", postflightScriptFile]
     removeFile "register.sh"
 
-    --setRootPrivileges
+    -- TODO: setRootPrivileges will make sure the generated files have
+    -- the correct username & permissions
+    setRootPrivileges
 
-    putStrLn $ "tmpdir is " ++ tmpdir
+    -- make .info file
+    mkInfoFile
+
+
 
   where
-    defaultInstallPath = "/usr/local"
-    prefix = fromMaybe defaultInstallPath $ installPrefix options
+    -- installPrefix guaranteed not nothing
+    prefix = fromJust $ installPrefix options
 
-    cabalBuildDir = tmpdir </> "dist"
-    stagingDir = tmpdir </> "stage"
+    cabalBuildDir = tmpdir     </> "dist"
+    scriptsDir    = tmpdir     </> "Resources"
+    stagingDir    = tmpdir     </> "stage"
+    contentsDir   = stagingDir </> "Contents"
+
+    postflightScriptFile = scriptsDir </> "postflight"
+    infoPath             = tmpdir     </> "package.info"
+
 
     runSetup :: String -> [String] -> IO ()
     runSetup cmd opts =
         runCmd "runghc" $ ["Setup", cmd] ++ (mkOpts opts)
 
+
     mkOpts s = s ++ ["--builddir=" ++ cabalBuildDir]
 
+
+    packageMaker :: String
+    -- note "packageMakerPath options" guaranteed not Nothing
+    packageMaker = fromJust $ packageMakerPath options
+
+    -- TODO: fill in package identifier based on contents of cabal file
+    pkgIdentifier :: String
+    pkgIdentifier = ""
+
+    packageTitle :: String
+    packageTitle = "FIXME"
+
+    -- path to output file
+    pkgDestinationFile :: FilePath
+    pkgDestinationFile = tmpdir </> "FIXME.pkg"
+
+
+    -- TODO: fill out info file here
+    mkInfoFile :: IO ()
+    mkInfoFile = return ()
+
+
+    -- TODO: make sure files are owned by root and have correct
+    -- permissions
+    setRootPrivileges :: IO ()
+    setRootPrivileges = return ()
 
 ------------------------------------------------------------------------
 -- |
@@ -242,6 +353,7 @@ getTempDirectory =
 cleanupTempDirectory :: FilePath -> IO ()
 cleanupTempDirectory dir = do
     --removeDirectoryRecursive dir
+    putStrLn $ "temporary directory is '" ++ dir ++ "'"
     return ()
 
 
