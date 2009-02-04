@@ -25,5 +25,6 @@ executable cabal2macpkg
             Cabal >= 1.6,
             pureMD5 >= 0.2.1,
             filepath,
+            regex-compat,
             unix
 

@@ -34,7 +34,7 @@ module Main (
   , usage
 
   -- * Macintosh @PackageInfo@ files
-  , KVPs(..)
+  , KVPs
   , PackageInfo(..)
   , packageInfoDefaults
   , packageInfoFields
@@ -49,6 +49,19 @@ module Main (
  ) where
 
 
+import Control.Concurrent
+import Control.Exception
+import Control.Monad
+
+import Data.Char
+import Data.List
+import Data.Maybe
+import Data.Monoid
+import Data.Version
+
+import Debug.Trace
+
+import Distribution.Package
 import Distribution.PackageDescription
 import Distribution.PackageDescription.Configuration
 import Distribution.PackageDescription.Parse
@@ -58,29 +71,19 @@ import Distribution.Simple.Setup
 import Distribution.Simple.Utils hiding (intercalate)
 import Distribution.Verbosity as Verbosity
 
-import qualified Data.ByteString.Lazy as B
-
-import Control.Monad
-import Control.Concurrent
-import Control.Exception
-
-import Data.List
-import qualified Data.Map as Map
-import Data.Maybe
-import Data.Monoid
-import Data.Char
-import Debug.Trace
-
-import qualified System.Console.GetOpt as GetOpt
-
 import System.Directory
 import System.Environment (getArgs)
 import System.Exit
 import System.FilePath
 import System.IO
+import System.Posix.User (getEffectiveUserName)
 import System.Process
 
-import System.Posix.User (getEffectiveUserName)
+import Text.Regex
+
+import qualified Data.ByteString.Lazy as B
+import qualified Data.Map as Map
+import qualified System.Console.GetOpt as GetOpt
 
 
 ------------------------------------------------------------------------
@@ -105,8 +108,12 @@ main = do
 runMain :: Options              -- ^ command-line options
         -> FilePath             -- ^ temp directory path
         -> IO ()
-runMain options tmpdir =
-  findPackageDesc "." >>= makeMacPkg options tmpdir
+runMain options tmpdir = do
+  cabalFile <- findPackageDesc "."
+  pkgDesc   <- flattenPackageDescription `liftM`
+                 readPackageDescription Verbosity.normal cabalFile
+
+  makeMacPkg options tmpdir pkgDesc
 
 
 
@@ -298,18 +305,21 @@ instance Show PackageInfo where
 ------------------------------------------------------------------------
 -- | the 'makeMacPkg' function does (or will do) all of the dirty work
 -- of building the .pkg files
-makeMacPkg :: Options           -- ^ command-line options
-           -> FilePath          -- ^ path to temp directory
-           -> FilePath          -- ^ path to .cabal file
+makeMacPkg :: Options            -- ^ command-line options
+           -> FilePath           -- ^ path to temp directory
+           -> PackageDescription -- ^ a parsed .cabal file
            -> IO ()
-makeMacPkg options tmpdir cabalFile = do
+makeMacPkg options tmpdir pkgDesc = do
     -- some portions of package building process require root
     -- privileges
-    checkRootPrivileges
-    createDirectories
 
-    pkgDesc <- flattenPackageDescription `liftM`
-                 readPackageDescription Verbosity.normal cabalFile
+    -- TODO/FIXME: check that assumption, during development it isn't
+    -- convenient so I'm commenting it out temporarily
+
+    -- checkRootPrivileges
+
+
+    createDirectories
 
     --------------------------------------------------------------------
     buildPackageContents
@@ -326,26 +336,26 @@ makeMacPkg options tmpdir cabalFile = do
     -- variables
     --------------------------------------------------------------------
 
+    -- package metadata
+    pkgDescription       = synopsis pkgDesc
+    pkgTitle             = unPackageName . packageName $ pkgDesc
+    pkgVersion           = showVersion . packageVersion $ pkgDesc
+    pkgBaseName          = subRegex (mkRegex "[[:space:]]+") pkgTitle "_"
+    pkgDestinationFile   = tmpdir </> "FIXME.pkg"
+
+    -- directories
     cabalBuildDir        = tmpdir     </> "dist"
     contentsDir          = stagingDir </> "Contents"
-    infoPath             = tmpdir     </> (pkgTitle ++ ".info")
-    packageMaker         = fromJust $ packageMakerPath options
-    postflightScriptFile = resourceDir </> "postflight"
-    prefix               = fromJust $ installPrefix options
     resourceDir          = tmpdir     </> "Resources"
     stagingDir           = tmpdir     </> "stage"
 
+    -- config options
+    packageMakerCmd      = fromJust $ packageMakerPath options
+    prefix               = fromJust $ installPrefix options
 
-    -- path to output file
-    pkgDestinationFile :: FilePath
-    pkgDestinationFile = tmpdir </> "FIXME.pkg"
-
-    -- TODO: fill in package identifier based on contents of cabal file
-    pkgDesc       = "FIXME-Description"
-    pkgIdentifier = ""
-    pkgTitle      = "FIXME-PkgTitle"
-    pkgVersion    = "0.0-FIXME"
-
+    -- output files
+    infoPath             = tmpdir     </> (pkgTitle ++ ".info")
+    postflightScriptFile = resourceDir </> "postflight"
 
 
     --------------------------------------------------------------------
@@ -390,7 +400,7 @@ makeMacPkg options tmpdir cabalFile = do
         overrides = Map.fromList [
                       ("Title", pkgTitle)
                     , ("Version", pkgVersion)
-                    , ("Description", pkgDesc)
+                    , ("Description", pkgDescription)
                     ]
 
         pinfo = PackageInfo $ Map.union overrides defaults
@@ -416,6 +426,8 @@ makeMacPkg options tmpdir cabalFile = do
       where
         mkOpts s = s ++ ["--builddir=" ++ cabalBuildDir]
 
+
+    unPackageName (PackageName s) = s
 
 
 ------------------------------------------------------------------------
