@@ -145,10 +145,15 @@ data Options = Options {
     } deriving (Eq, Show)
 
 
+defaultOptions = Options { installPrefix    = Just "/usr/local"
+                         , showUsage        = False
+                         , packageMakerPath = Just "/Developer/usr/bin/packagemaker"
+                         }
+
 instance Monoid Options where
-    mempty = Options { installPrefix    = Just "/usr/local"
+    mempty = Options { installPrefix    = Nothing
                      , showUsage        = False
-                     , packageMakerPath = Just "/Developer/usr/bin/packagemaker"
+                     , packageMakerPath = Nothing
                      }
 
     a `mappend` b =
@@ -158,8 +163,8 @@ instance Monoid Options where
             , showUsage        = showUsage a || showUsage b
           }
       where
-        (+) a b    = getLast $ (Last a) `mappend` (Last b)
-        override f = (f a) + (f b)
+        a *+* b    = getLast $ Last a `mappend` Last b
+        override f = f a *+* f b
 
 
 ------------------------------------------------------------------------
@@ -213,7 +218,7 @@ getOptions = do
   args <- getArgs
   opts <-
       case GetOpt.getOpt GetOpt.RequireOrder optionFlags args of
-        (o,n,[])   -> return $ mconcat o
+        (o,n,[])   -> return $ defaultOptions `mappend` mconcat o
         (_,_,errs) -> usage errs
 
   if showUsage opts
