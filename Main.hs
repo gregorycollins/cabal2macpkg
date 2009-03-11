@@ -21,6 +21,7 @@
 -- A consequence of this quick n' dirty approach is that in order to
 -- build the installer for a cabal package, you need to have already
 -- installed all of its dependencies on the build machine.
+------------------------------------------------------------------------
 
 module Main (
   -- * Program entry point
@@ -33,12 +34,6 @@ module Main (
   , optionFlags
   , usage
 
-  -- * Macintosh @PackageInfo@ files
-  , KVPs
-  , PackageInfo(..)
-  , packageInfoDefaults
-  , packageInfoFields
-
   -- * The \"heavy lifting\"
   , makeMacPkg
 
@@ -49,25 +44,20 @@ module Main (
  ) where
 
 
-import Control.Concurrent
 import Control.Exception
 import Control.Monad
 
 import Data.Char
+import Data.Function
 import Data.List
 import Data.Maybe
 import Data.Monoid
 import Data.Version
 
-import Debug.Trace
-
 import Distribution.Package
 import Distribution.PackageDescription
 import Distribution.PackageDescription.Configuration
 import Distribution.PackageDescription.Parse
-import Distribution.Simple.Build
-import Distribution.Simple.Configure
-import Distribution.Simple.Setup
 import Distribution.Simple.Utils hiding (intercalate)
 import Distribution.Verbosity as Verbosity
 
@@ -81,9 +71,12 @@ import System.Process
 
 import Text.Regex
 
-import qualified Data.ByteString.Lazy as B
-import qualified Data.Map as Map
 import qualified System.Console.GetOpt as GetOpt
+
+
+------------------------------------------------------------------------
+-- local imports
+import Distribution.OSX.Info
 
 
 ------------------------------------------------------------------------
@@ -93,10 +86,10 @@ import qualified System.Console.GetOpt as GetOpt
 ------------------------------------------------------------------------
 main :: IO ()
 main = do
-  options <- getOptions
+  opts <- getOptions
   bracket getTempDirectory
           cleanupTempDirectory
-          (runMain options)
+          (runMain opts)
 
 
 
@@ -108,12 +101,12 @@ main = do
 runMain :: Options              -- ^ command-line options
         -> FilePath             -- ^ temp directory path
         -> IO ()
-runMain options tmpdir = do
+runMain opts tmpdir = do
   cabalFile <- findPackageDesc "."
   pkgDesc   <- flattenPackageDescription `liftM`
                  readPackageDescription Verbosity.normal cabalFile
 
-  makeMacPkg options tmpdir pkgDesc
+  makeMacPkg opts tmpdir pkgDesc
 
 
 
@@ -145,6 +138,7 @@ data Options = Options {
     } deriving (Eq, Show)
 
 
+defaultOptions :: Options
 defaultOptions = Options { installPrefix    = Just "/usr/local"
                          , showUsage        = False
                          , packageMakerPath = Just "/Developer/usr/bin/packagemaker"
@@ -163,7 +157,10 @@ instance Monoid Options where
             , showUsage        = showUsage a || showUsage b
           }
       where
-        a *+* b    = getLast $ Last a `mappend` Last b
+        -- monoid append using "Last" behaviour
+        (*+*)    :: Maybe a -> Maybe a -> Maybe a
+        (*+*)    = (getLast .) . (mappend `on` Last)
+
         override f = f a *+* f b
 
 
@@ -218,7 +215,7 @@ getOptions = do
   args <- getArgs
   opts <-
       case GetOpt.getOpt GetOpt.RequireOrder optionFlags args of
-        (o,n,[])   -> return $ defaultOptions `mappend` mconcat o
+        (o,_,[])   -> return $ defaultOptions `mappend` mconcat o
         (_,_,errs) -> usage errs
 
   if showUsage opts
@@ -228,79 +225,6 @@ getOptions = do
 ------------------------------------------------------------------------
 -- end options stuff
 ------------------------------------------------------------------------
-
-
-
-------------------------------------------------------------------------
--- types & functions for mac packageinfo files
-------------------------------------------------------------------------
-
-type KVPs = Map.Map String String
-
--- | a @PackageInfo@ file is just a key-value pair mapping. We'll wrap
--- it in a newtype so we can define a custom 'Show' instance
-newtype PackageInfo = PackageInfo KVPs
-
-
--- | The 'packageInfoFields' variable stores a list of the available
--- fields for package .info files. Currently not in use, it's mostly
--- for reference. I stole this stuff from some python code,
--- documentation for the various Mac file formats is difficult to find
-packageInfoFields :: [String]
-packageInfoFields = [
-    "Title"
-  , "Version"
-  , "Description"
-  , "DefaultLocation"
-  , "DeleteWarning"
-  , "NeedsAuthorization"
-  , "DisableStop"
-  , "UseUserMask"
-  , "Application"
-  , "Relocatable"
-  , "Required"
-  , "InstallOnly"
-  , "RequiresReboot"
-  , "RootVolumeOnly"
-  , "LongFilenames"
-  , "LibrarySubdirectory"
-  , "AllowBackRev"
-  , "OverwritePermissions"
-  , "InstallFat"]
-
-
--- | defaults for the packageinfo file
-packageInfoDefaults :: KVPs
-packageInfoDefaults = Map.fromList [
-                        ("Title"                , ""        )
-                      , ("Version"              , ""        )
-                      , ("Description"          , ""        )
-                      , ("DefaultLocation"      , "/"       )
-                      , ("DeleteWarning"        , ""        )
-                      , ("NeedsAuthorization"   , "YES"     )
-                      , ("DisableStop"          , "NO"      )
-                      , ("UseUserMask"          , "YES"     )
-                      , ("Application"          , "NO"      )
-                      , ("Relocatable"          , "NO"      )
-                      , ("Required"             , "NO"      )
-                      , ("InstallOnly"          , "NO"      )
-                      , ("RequiresReboot"       , "NO"      )
-                      , ("RootVolumeOnly"       , "YES"     )
-                      , ("InstallFat"           , "NO"      )
-                      , ("LongFilenames"        , "YES"     )
-                      , ("LibrarySubdirectory"  , "Standard")
-                      , ("AllowBackRev"         , "YES"     )
-                      , ("OverwritePermissions" , "NO"      )
-                      ]
-
-
-instance Show PackageInfo where
-    show (PackageInfo pkg) = e `concatMap` alist
-      where
-        alist = Map.toAscList pkg
-        e (k,v) = k ++ " " ++ v ++ "\n"
-
-
 
 
 ------------------------------------------------------------------------
@@ -314,7 +238,7 @@ makeMacPkg :: Options            -- ^ command-line options
            -> FilePath           -- ^ path to temp directory
            -> PackageDescription -- ^ a parsed .cabal file
            -> IO ()
-makeMacPkg options tmpdir pkgDesc = do
+makeMacPkg opts tmpdir pkgDesc = do
     -- some portions of package building process require root
     -- privileges
 
@@ -333,8 +257,8 @@ makeMacPkg options tmpdir pkgDesc = do
     -- the correct username & permissions
     setRootPrivileges
 
-    -- make .info file
-    mkInfoFile
+    -- make .info files
+    mkInfoFiles
 
   where
     --------------------------------------------------------------------
@@ -344,22 +268,25 @@ makeMacPkg options tmpdir pkgDesc = do
     -- package metadata
     pkgDescription       = synopsis pkgDesc
     pkgTitle             = unPackageName . packageName $ pkgDesc
-    pkgVersion           = showVersion . packageVersion $ pkgDesc
+    pkgVersionString     = showVersion . packageVersion $ pkgDesc
     pkgBaseName          = subRegex (mkRegex "[[:space:]]+") pkgTitle "_"
-    pkgDestinationFile   = tmpdir </> "FIXME.pkg"
+    pkgDestinationFile   = tmpdir </> (pkgBaseName ++ "-" ++ pkgVersionString
+                                                   ++ ".pkg")
 
     -- directories
     cabalBuildDir        = tmpdir     </> "dist"
     contentsDir          = stagingDir </> "Contents"
     resourceDir          = tmpdir     </> "Resources"
+    scriptsDir           = tmpdir     </> "Scripts"
     stagingDir           = tmpdir     </> "stage"
 
     -- config options
-    packageMakerCmd      = fromJust $ packageMakerPath options
-    prefix               = fromJust $ installPrefix options
+    packageMakerCmd      = fromJust $ packageMakerPath opts
+    prefix               = fromJust $ installPrefix opts
 
     -- output files
-    infoPath             = tmpdir     </> (pkgTitle ++ ".info")
+    infoPath             = tmpdir      </> "Info.plist"
+    descInfoPath         = resourceDir </> "Description.plist"
     postflightScriptFile = resourceDir </> "postflight"
 
 
@@ -378,13 +305,14 @@ makeMacPkg options tmpdir pkgDesc = do
     --------------------------------------------------------------------
     -- creates necessary directories inside the work area
     createDirectories =
-      createDirectory `mapM_` [stagingDir, resourceDir, contentsDir]
+      createDirectory `mapM_` [stagingDir, scriptsDir, resourceDir,
+                                         contentsDir]
 
 
     --------------------------------------------------------------------
     -- uses cabal to build the package into the work area
     buildPackageContents = do
-      runSetup   "configure" ["--global", "--prefix=" ++ prefix]
+      runSetup   "configure" ["--global", "--prefix=/testme"]
       runSetup   "build"     []
       runSetup   "haddock"   []
       runSetup   "copy"      ["--destdir=" ++ contentsDir]
@@ -397,18 +325,17 @@ makeMacPkg options tmpdir pkgDesc = do
 
     --------------------------------------------------------------------
     -- populate the package .info file in the resource directory
-    mkInfoFile :: IO ()
-    mkInfoFile =
+    mkInfoFiles :: IO ()
+    mkInfoFiles = do
         writeFile infoPath (show pinfo)
+        writeFile descInfoPath (show dpinfo)
       where
-        defaults  = packageInfoDefaults
-        overrides = Map.fromList [
-                      ("Title", pkgTitle)
-                    , ("Version", pkgVersion)
-                    , ("Description", pkgDescription)
-                    ]
+        pinfo = mkInfoPlist pkgBaseName
+                            pkgVersionString
+                            pkgDescription
+                            prefix
 
-        pinfo = PackageInfo $ Map.union overrides defaults
+        dpinfo = mkDescriptionPlist pkgBaseName pkgVersionString
 
 
     -- TODO: make sure files are owned by root and have correct
@@ -426,8 +353,8 @@ makeMacPkg options tmpdir pkgDesc = do
                                 -- i.e. "configure"/"build"/etc
              -> [String]        -- ^ additional arguments
              -> IO ()
-    runSetup cmd opts =
-        runCmd "runghc" $ ["Setup", cmd] ++ mkOpts opts
+    runSetup cmd args =
+        runCmd "runghc" $ ["Setup", cmd] ++ mkOpts args
       where
         mkOpts s = s ++ ["--builddir=" ++ cabalBuildDir]
 

@@ -18,7 +18,7 @@ executable cabal2macpkg
     build-depends:      
             base >= 3,
             pretty,
-            process,
+            process == 1.0.1.0,
             directory,
             containers,
             bytestring,
@@ -26,5 +26,6 @@ executable cabal2macpkg
             pureMD5 >= 0.2.1,
             filepath,
             regex-compat,
-            unix
+            unix,
+            xml
 
