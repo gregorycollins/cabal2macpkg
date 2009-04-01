@@ -1,7 +1,25 @@
 TODO for cabal2macpkg
 =====================
 
-### status update ###
+## TODO items (round 1) ##
+
+* add support for relocatable packages -- not sure how to do this, any
+  ideas would be appreciated. Manuel wanted this.
+
+
+## TODO items (round 2) ##
+
+* add a "--metapackage" flag (or something similar) that will cause
+  cabal2macpkg to make .pkg files of the project's dependencies and
+  generate an aggregate .mpkg file
+
+* may need "--exclude"/"--include" flags for this, or some other
+  mechanism to stop the recursion. For the haskell platform a
+  recursion depth of 1 is probably fine.
+
+
+## status update ##
+
 N.B. this is more for my notetaking benefit than for the reader
 
 Status: getting close. Have decided, for the time being, to use the
@@ -41,32 +59,3 @@ command-line tools right now. Apple's solution seems to be "use the
 GUI tool!" which is useless to me.
 
 
-round 1
--------
-
-* get the staging area in the right format for the OSX installer tool
-  and run it 
-
-* If I want relocatable packages, which Manuel wanted, I've become
-  convinced that I need to move away from `cabal register
-  --gen-script` to `cabal register --gen-pkg-config` and write my own
-  postflight script. This will mean an extra step here (boilerplate
-  shell script, rewriting the target path to `$4` or whatever the
-  correct argument is). Note to self: use "env" to locate ghc-pkg?
-
-* add --output=[FILE] and an --outputdir=[DIR] to control where the
-  generated .pkg files go
-
-* code cleanup (warnings, imports, formatting, etc) *(a pre-release
-  activity)*
-
-
-round 2
--------
-
-* add a "--metapackage" flag (or something similar) that will cause
-  cabal2macpkg to make .pkg files of the project's dependencies and
-  generate an aggregate .mpkg file
-
-* may need "--exclude"/"--include" flags for this, or some other
-  mechanism to stop the recursion

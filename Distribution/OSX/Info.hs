@@ -47,7 +47,6 @@ data DescriptionPlist = DescriptionPlist {
 }
 
 
-{-
 instance Monoid InfoPlist where
     mempty = InfoPlist {
                plist_infoString          = Nothing
@@ -81,7 +80,7 @@ instance Monoid InfoPlist where
         (*+*)    = (getLast .) . (mappend `on` Last)
 
         o f = f a *+* f b
--}
+
 
 emptyPlist :: InfoPlist
 emptyPlist = InfoPlist {
@@ -98,6 +97,7 @@ emptyPlist = InfoPlist {
              }
 
 
+emptyDescPlist :: DescriptionPlist
 emptyDescPlist = DescriptionPlist {
                    dplist_title   = Nothing
                  , dplist_version = Nothing
@@ -167,13 +167,14 @@ instance Show DescriptionPlist where
                                  ++ "</string>\n")
                           (f pkg)
 
+{-
         bool :: String -> (DescriptionPlist -> Maybe Bool) -> String
         bool hdr f = maybe ""
                            (\v -> key hdr ++ "\t" ++ val v ++ "\n")
                            (f pkg)
           where
             val b = if b then "<true/>" else "<false/>"
-
+-}
 
 ------------------------------------------------------------------------
 mkInfoPlist :: String           -- ^ package identifier

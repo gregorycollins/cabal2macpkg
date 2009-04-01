@@ -38,7 +38,7 @@ module Main (
   , makeMacPkg
 
   -- * Misc. helper functions
-  , cleanupTempDirectory 
+  , cleanupTempDirectory
   , getTempDirectory
   , runCmd
  ) where
@@ -123,38 +123,55 @@ runMain opts tmpdir = do
 -- will build an Options object where the fields of @a@ are overridden
 -- by the non-'Nothing' fields of @b@
 data Options = Options {
-      installPrefix    :: Maybe String  -- ^ the installation prefix
-                                        -- for the generated library
+      installPrefix    :: Maybe String   -- ^ the installation prefix
+                                         -- for the generated library
 
-    , packageMakerPath :: Maybe String  -- ^ path to the OSX
-                                        -- packagemaker binary (we'll
-                                        -- choose a sane default here)
+    , packageMakerPath :: Maybe String   -- ^ path to the OSX
+                                         -- packagemaker binary (we'll
+                                         -- choose a sane default
+                                         -- here)
 
-    , showUsage        :: Bool          -- ^ if true, show the usage
-                                        -- message, either because the
-                                        -- user requested it or
-                                        -- because of an error parsing
-                                        -- the command line arguments
+    , showUsage        :: Bool           -- ^ if true, show the usage
+                                         -- message, either because
+                                         -- the user requested it or
+                                         -- because of an error
+                                         -- parsing the command line
+                                         -- arguments
+
+    , packageOutputDir :: Maybe String   -- ^ output dir for generated
+                                         -- .pkg file
+
+    , packageOutputFile :: Maybe String  -- ^ output filename for
+                                         -- generated .pkg file -- if
+                                         -- specified overrides
+                                         -- packageOutputDir
+
     } deriving (Eq, Show)
 
 
 defaultOptions :: Options
-defaultOptions = Options { installPrefix    = Just "/usr/local"
-                         , showUsage        = False
-                         , packageMakerPath = Just "/Developer/usr/bin/packagemaker"
+defaultOptions = Options { installPrefix     = Just "/"
+                         , showUsage         = False
+                         , packageMakerPath  = Just "/Developer/usr/bin/packagemaker"
+                         , packageOutputDir  = Nothing
+                         , packageOutputFile = Nothing
                          }
 
 instance Monoid Options where
-    mempty = Options { installPrefix    = Nothing
-                     , showUsage        = False
-                     , packageMakerPath = Nothing
+    mempty = Options { installPrefix     = Nothing
+                     , showUsage         = False
+                     , packageMakerPath  = Nothing
+                     , packageOutputDir  = Nothing
+                     , packageOutputFile = Nothing
                      }
 
     a `mappend` b =
         Options {
-              installPrefix    = override installPrefix
-            , packageMakerPath = override packageMakerPath
-            , showUsage        = showUsage a || showUsage b
+              installPrefix     = override installPrefix
+            , packageMakerPath  = override packageMakerPath
+            , packageOutputDir  = override packageOutputDir
+            , packageOutputFile = override packageOutputFile
+            , showUsage         = showUsage a || showUsage b
           }
       where
         -- monoid append using "Last" behaviour
@@ -172,14 +189,35 @@ optionFlags = [ GetOpt.Option
                   ["help"]
                   (GetOpt.NoArg $ mempty {showUsage=True})
                   "prints usage statement"
+
               , GetOpt.Option
                   ""
                   ["prefix"]
                   (GetOpt.OptArg mkPrefix "DIR")
-                  "installation prefix directory" ]
+                  "installation prefix directory"
+
+              , GetOpt.Option
+                  "d"
+                  ["outdir"]
+                  (GetOpt.OptArg mkOutputDir "DIR")
+                  "output install package to the given directory (default \".\")"
+
+              , GetOpt.Option
+                  "o"
+                  ["output"]
+                  (GetOpt.OptArg mkOutputFile "FILE")
+                  "output install package to the given file"
+              ]
+
   where
     mkPrefix :: Maybe String -> Options
     mkPrefix m = mempty { installPrefix = m }
+
+    mkOutputDir :: Maybe String -> Options
+    mkOutputDir m = mempty { packageOutputDir = m }
+
+    mkOutputFile :: Maybe String -> Options
+    mkOutputFile m = mempty { packageOutputFile = m }
 
 
 ------------------------------------------------------------------------
@@ -242,23 +280,16 @@ makeMacPkg opts tmpdir pkgDesc = do
     -- some portions of package building process require root
     -- privileges
 
-    -- TODO/FIXME: check that assumption, during development it isn't
-    -- convenient so I'm commenting it out temporarily
-
-    -- checkRootPrivileges
+    checkRootPrivileges
 
 
     createDirectories
 
     --------------------------------------------------------------------
     buildPackageContents
-
-    -- TODO: setRootPrivileges will make sure the generated files have
-    -- the correct username & permissions
     setRootPrivileges
-
-    -- make .info files
     mkInfoFiles
+    runPackageMaker
 
   where
     --------------------------------------------------------------------
@@ -270,8 +301,6 @@ makeMacPkg opts tmpdir pkgDesc = do
     pkgTitle             = unPackageName . packageName $ pkgDesc
     pkgVersionString     = showVersion . packageVersion $ pkgDesc
     pkgBaseName          = subRegex (mkRegex "[[:space:]]+") pkgTitle "_"
-    pkgDestinationFile   = tmpdir </> (pkgBaseName ++ "-" ++ pkgVersionString
-                                                   ++ ".pkg")
 
     -- directories
     cabalBuildDir        = tmpdir     </> "dist"
@@ -285,9 +314,16 @@ makeMacPkg opts tmpdir pkgDesc = do
     prefix               = fromJust $ installPrefix opts
 
     -- output files
+    temporaryPkgConfig   = tmpdir      </> "temp.pkgconfig"
     infoPath             = tmpdir      </> "Info.plist"
     descInfoPath         = resourceDir </> "Description.plist"
     postflightScriptFile = resourceDir </> "postflight"
+
+
+    outputPackageDir     = fromMaybe "." (packageOutputDir opts)
+    computedPackageFile  = (pkgBaseName ++ "-" ++ pkgVersionString ++ ".pkg")
+    outputPackagePath    = fromMaybe (outputPackageDir </> computedPackageFile)
+                                     (packageOutputFile opts)
 
 
     --------------------------------------------------------------------
@@ -312,15 +348,23 @@ makeMacPkg opts tmpdir pkgDesc = do
     --------------------------------------------------------------------
     -- uses cabal to build the package into the work area
     buildPackageContents = do
-      runSetup   "configure" ["--global", "--prefix=/testme"]
-      runSetup   "build"     []
-      runSetup   "haddock"   []
-      runSetup   "copy"      ["--destdir=" ++ contentsDir]
-      runSetup   "register"  ["--gen-script"]
+        runSetup   "configure" ["--global", "--prefix=/usr/local"]
+        runSetup   "build"     []
+        runSetup   "haddock"   []
+        runSetup   "copy"      ["--destdir=" ++ contentsDir]
+        runSetup   "register"  ["--gen-pkg-config=" ++ temporaryPkgConfig]
 
-      copyFile   "register.sh" postflightScriptFile
-      runCmd     "chmod" ["+x", postflightScriptFile]
-      removeFile "register.sh"
+        makePostFlightScriptFile temporaryPkgConfig postflightScriptFile
+
+
+    --------------------------------------------------------------------
+    -- FIXME: make this stuff relocatable
+    makePostFlightScriptFile src dest = do
+        contents <- readFile src
+        let output = "#!/bin/sh\n\
+                     \echo '" ++ contents ++ 
+                     "' | /usr/bin/env ghc-pkg --global update -"
+        writeFile dest output
 
 
     --------------------------------------------------------------------
@@ -338,10 +382,37 @@ makeMacPkg opts tmpdir pkgDesc = do
         dpinfo = mkDescriptionPlist pkgBaseName pkgVersionString
 
 
-    -- TODO: make sure files are owned by root and have correct
-    -- permissions
+
+    --------------------------------------------------------------------
+    -- make sure files are owned by root and have correct permissions
     setRootPrivileges :: IO ()
-    setRootPrivileges = return ()
+    setRootPrivileges = do
+        runCmd "chmod" ["-R", "g+r,g-w,o+r,o-w", tmpdir]
+        runCmd "chown" ["-R", "root", tmpdir]
+        runCmd "sh" ["-c", "find " ++ tmpdir
+                            ++ " -print0 -type d | xargs -0 chmod a+x"]
+
+
+    --------------------------------------------------------------------
+    -- build the package
+    runPackageMaker :: IO ()
+    runPackageMaker = do
+        putStrLn $ "building " ++ outputPackagePath
+        hFlush stdout
+
+        runCmd packageMakerCmd [ "-build"
+                               , "-p"
+                               , outputPackagePath
+                               , "-f"
+                               , contentsDir
+                               , "-ds"
+                               , "-r"
+                               , resourceDir
+                               , "-i"
+                               , infoPath
+                               , "-d"
+                               , descInfoPath ]
+
 
 
     --------------------------------------------------------------------
@@ -407,9 +478,6 @@ getTempDirectory =
 --
 cleanupTempDirectory :: FilePath
                      -> IO ()
-cleanupTempDirectory dir = do
-    --removeDirectoryRecursive dir
-    putStrLn $ "temporary directory is '" ++ dir ++ "'"
-    return ()
+cleanupTempDirectory = removeDirectoryRecursive
 
 
