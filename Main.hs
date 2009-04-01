@@ -388,7 +388,7 @@ makeMacPkg opts tmpdir pkgDesc = do
     setRootPrivileges :: IO ()
     setRootPrivileges = do
         runCmd "chmod" ["-R", "g+r,g-w,o+r,o-w", tmpdir]
-        runCmd "chown" ["-R", "root", tmpdir]
+        runCmd "chown" ["-R", "root:wheel", tmpdir]
         runCmd "sh" ["-c", "find " ++ tmpdir
                             ++ " -print0 -type d | xargs -0 chmod a+x"]
 
