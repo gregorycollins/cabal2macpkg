@@ -16,15 +16,16 @@ executable cabal2macpkg
     ghc-options:        -Wall
 
     build-depends:      
+            Cabal >= 1.6,
             base >= 3,
+            bytestring,
+            containers,
+            directory,
+            filepath,
+            hxt,
             pretty,
             process == 1.0.1.0,
-            directory,
-            containers,
-            bytestring,
-            Cabal >= 1.6,
             pureMD5 >= 0.2.1,
-            filepath,
             regex-compat,
             unix,
             xml

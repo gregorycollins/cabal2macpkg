@@ -151,7 +151,7 @@ makeMacPkg opts tmpdir pkgDesc = do
         runCmd "chmod" ["-R", "g+r,g-w,o+r,o-w", tmpdir]
         runCmd "chown" ["-R", "root:wheel", tmpdir]
         runCmd "sh" ["-c", "find " ++ tmpdir
-                            ++ " -print0 -type d | xargs -0 chmod a+x"]
+                            ++ " -type d -print0 | xargs -0 chmod a+x"]
 
 
     --------------------------------------------------------------------
