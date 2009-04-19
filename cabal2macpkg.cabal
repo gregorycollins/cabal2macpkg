@@ -21,12 +21,14 @@ executable cabal2macpkg
             bytestring,
             containers,
             directory,
+            FileManip,
             filepath,
             hxt,
             pretty,
             process == 1.0.1.0,
             pureMD5 >= 0.2.1,
             regex-compat,
+            split,
             unix,
             xml
 

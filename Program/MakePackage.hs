@@ -1,6 +1,6 @@
 -- | This module contains routines for making mac .pkg files.
 ------------------------------------------------------------------------
-module Program.MakePackage ( makeMacPkg ) where
+module Program.MakePackage ( runMakePackage ) where
 
 import Control.Monad
 
@@ -12,12 +12,14 @@ import Data.Version
 
 import Distribution.Package
 import Distribution.PackageDescription
+import Distribution.PackageDescription.Configuration
+import Distribution.PackageDescription.Parse
 import Distribution.Simple.Utils hiding (intercalate)
+import Distribution.Verbosity as Verbosity
 
 import System.Directory
 import System.FilePath
 import System.IO
-import System.Posix.User (getEffectiveUserName)
 
 import Text.Regex
 
@@ -27,6 +29,22 @@ import Text.Regex
 import Distribution.OSX.Info
 import Program.Options
 import Program.Util
+
+
+------------------------------------------------------------------------
+-- | The program driver. Given the command-line options and a temp
+-- directory path, searches the current working directory for a .cabal
+-- file and builds an OSX package file based on its contents.
+------------------------------------------------------------------------
+runMakePackage :: Options       -- ^ command-line options
+               -> FilePath      -- ^ temp directory path
+               -> IO ()
+runMakePackage opts tmpdir = do
+  cabalFile <- findPackageDesc "."
+  pkgDesc   <- flattenPackageDescription `liftM`
+                 readPackageDescription Verbosity.normal cabalFile
+
+  makeMacPkg opts tmpdir pkgDesc
 
 
 ------------------------------------------------------------------------
@@ -91,19 +109,12 @@ makeMacPkg opts tmpdir pkgDesc = do
     -- helper I/O actions
     --------------------------------------------------------------------
 
-    --------------------------------------------------------------------
-    -- checks that we're root and bails if not
-    checkRootPrivileges :: IO ()
-    checkRootPrivileges = do
-      whoiam <- getEffectiveUserName
-      when (whoiam /= "root") $ die "must be root to run cabal2macpkg"
-
 
     --------------------------------------------------------------------
     -- creates necessary directories inside the work area
     createDirectories =
-      createDirectory `mapM_` [stagingDir, scriptsDir, resourceDir,
-                                         contentsDir]
+      (createDirectoryIfMissing True) `mapM_` [stagingDir, scriptsDir,
+                                               resourceDir, contentsDir]
 
 
     --------------------------------------------------------------------
@@ -121,11 +132,15 @@ makeMacPkg opts tmpdir pkgDesc = do
     --------------------------------------------------------------------
     -- FIXME: make this stuff relocatable
     makePostFlightScriptFile src dest = do
-        contents <- readFile src
-        let output = "#!/bin/sh\n\
-                     \echo '" ++ contents ++ 
-                     "' | /usr/bin/env ghc-pkg --global update -"
-        writeFile dest output
+        fe <- doesFileExist src
+        if not fe then
+            return ()
+          else do
+            contents <- readFile src
+            let output = "#!/bin/sh\n\
+                         \echo '" ++ contents ++ 
+                          "' | /usr/bin/env ghc-pkg --global update -"
+            writeFile dest output
 
 
     --------------------------------------------------------------------

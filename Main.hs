@@ -33,17 +33,13 @@ module Main (
 import Control.Exception
 import Control.Monad
 
-import Distribution.PackageDescription.Configuration
-import Distribution.PackageDescription.Parse
-import Distribution.Simple.Utils hiding (intercalate)
-import Distribution.Verbosity as Verbosity
-
 import System.IO
 
 
 ------------------------------------------------------------------------
 -- local imports
 import Program.MakePackage
+import Program.MakeMetaPackage
 import Program.Options
 import Program.Util
 
@@ -57,21 +53,12 @@ main = do
   opts <- getOptions
   bracket getTempDirectory
           cleanupTempDirectory
-          (runMakePackage opts)
+          (runMain opts)
 
 
-
-------------------------------------------------------------------------
--- | The program driver. Given the command-line options and a temp
--- directory path, searches the current working directory for a .cabal
--- file and builds an OSX package file based on its contents.
-------------------------------------------------------------------------
-runMakePackage :: Options       -- ^ command-line options
-               -> FilePath      -- ^ temp directory path
-               -> IO ()
-runMakePackage opts tmpdir = do
-  cabalFile <- findPackageDesc "."
-  pkgDesc   <- flattenPackageDescription `liftM`
-                 readPackageDescription Verbosity.normal cabalFile
-
-  makeMacPkg opts tmpdir pkgDesc
+runMain :: Options -> FilePath -> IO ()
+runMain opts tempdir =
+  if areBuildingMetaPackage opts then
+      runMakeMetaPkg opts tempdir
+    else
+      runMakePackage opts tempdir

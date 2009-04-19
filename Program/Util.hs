@@ -1,5 +1,5 @@
 -- | Utility functions
-module Program.Util (runCmd, getTempDirectory, cleanupTempDirectory)
+module Program.Util(runCmd, getTempDirectory, cleanupTempDirectory, checkRootPrivileges)
 where
 
 
@@ -16,8 +16,8 @@ import System.Directory
 import System.Exit
 import System.FilePath
 import System.IO
+import System.Posix.User (getEffectiveUserName)
 import System.Process
-
 
 
 ------------------------------------------------------------------------
@@ -61,3 +61,13 @@ getTempDirectory =
 cleanupTempDirectory :: FilePath
                      -> IO ()
 cleanupTempDirectory = removeDirectoryRecursive
+
+
+------------------------------------------------------------------------
+-- | checks that we're root and bails if not
+checkRootPrivileges :: IO ()
+checkRootPrivileges = do
+  whoiam <- getEffectiveUserName
+  when (whoiam /= "root") $ die "must be root to run cabal2macpkg"
+
+
