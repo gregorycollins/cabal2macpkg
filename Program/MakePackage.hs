@@ -26,7 +26,7 @@ import Text.Regex
 
 ------------------------------------------------------------------------
 -- local imports
-import Distribution.OSX.Info
+import Distribution.OSX.PackageInfo
 import Program.Options
 import Program.Util
 
@@ -84,7 +84,6 @@ makeMacPkg opts tmpdir pkgDesc = do
     -- directories
     cabalBuildDir        = tmpdir     </> "dist"
     contentsDir          = stagingDir </> "Contents"
-    resourceDir          = tmpdir     </> "Resources"
     scriptsDir           = tmpdir     </> "Scripts"
     stagingDir           = tmpdir     </> "stage"
 
@@ -94,9 +93,8 @@ makeMacPkg opts tmpdir pkgDesc = do
 
     -- output files
     temporaryPkgConfig   = tmpdir      </> "temp.pkgconfig"
-    infoPath             = tmpdir      </> "Info.plist"
-    descInfoPath         = resourceDir </> "Description.plist"
-    postflightScriptFile = resourceDir </> "postflight"
+    infoPath             = tmpdir      </> "PackageInfo"
+    postflightScriptFile = scriptsDir  </> "postflight"
 
 
     outputPackageDir     = fromMaybe "." (packageOutputDir opts)
@@ -113,14 +111,14 @@ makeMacPkg opts tmpdir pkgDesc = do
     --------------------------------------------------------------------
     -- creates necessary directories inside the work area
     createDirectories =
-      (createDirectoryIfMissing True) `mapM_` [stagingDir, scriptsDir,
-                                               resourceDir, contentsDir]
+      (createDirectoryIfMissing True)
+        `mapM_` [stagingDir, scriptsDir, contentsDir]
 
 
     --------------------------------------------------------------------
     -- uses cabal to build the package into the work area
     buildPackageContents = do
-        runSetup   "configure" ["--global", "--prefix=/usr/local"]
+        runSetup   "configure" ["--global", "--prefix="++prefix]
         runSetup   "build"     []
         runSetup   "haddock"   []
         runSetup   "copy"      ["--destdir=" ++ contentsDir]
@@ -144,19 +142,15 @@ makeMacPkg opts tmpdir pkgDesc = do
 
 
     --------------------------------------------------------------------
-    -- populate the package .info file in the resource directory
+    -- populate the packageinfo file in the resource directory
     mkInfoFiles :: IO ()
     mkInfoFiles = do
-        writeFile infoPath (show pinfo)
-        writeFile descInfoPath (show dpinfo)
-      where
-        pinfo = mkInfoPlist pkgBaseName
-                            pkgVersionString
-                            pkgDescription
-                            prefix
+        nf <- getNumFiles contentsDir
+        kb <- getFileSizesInKB contentsDir
+        let pinfo = PackageInfo kb nf ("haskell."++pkgTitle)
+                                Nothing (Just "postinstall")
 
-        dpinfo = mkDescriptionPlist pkgBaseName pkgVersionString
-
+        writePackageInfo infoPath pinfo
 
 
     --------------------------------------------------------------------
@@ -176,18 +170,17 @@ makeMacPkg opts tmpdir pkgDesc = do
         putStrLn $ "building " ++ outputPackagePath
         hFlush stdout
 
-        runCmd packageMakerCmd [ "-build"
-                               , "-p"
+        runCmd packageMakerCmd [ "-o"
                                , outputPackagePath
-                               , "-f"
+                               , "--root"
                                , contentsDir
-                               , "-ds"
-                               , "-r"
-                               , resourceDir
-                               , "-i"
-                               , infoPath
-                               , "-d"
-                               , descInfoPath ]
+                               , "--scripts"
+                               , scriptsDir
+                               , "--target"
+                               , "10.5"
+                               , "--root-volume-only"
+                               , "--info"
+                               , infoPath ]
 
 
 

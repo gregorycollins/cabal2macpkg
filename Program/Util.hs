@@ -1,6 +1,13 @@
 -- | Utility functions
-module Program.Util(runCmd, getTempDirectory, cleanupTempDirectory, checkRootPrivileges)
-where
+module Program.Util
+  ( runCmd
+  , runCmdWithOutput
+  , getFileSizesInKB
+  , getNumFiles
+  , getTempDirectory
+  , cleanupTempDirectory
+  , checkRootPrivileges
+  ) where
 
 
 
@@ -35,6 +42,23 @@ runCmd cmd args = do
                                    ++ cmd ++ " "
                                    ++ intercalate " " args
 
+
+runCmdWithOutput :: String
+                 -> IO String
+runCmdWithOutput cmd = do
+  readProcess "sh" ["-c", cmd] ""
+
+
+getNumFiles :: FilePath -> IO Int
+getNumFiles fp =
+    runCmdWithOutput ("find '" ++ fp ++ "' -type f | wc -l")
+        >>= return . (read :: String -> Int)
+
+getFileSizesInKB :: FilePath -> IO Int
+getFileSizesInKB fp = do
+    txt <- runCmdWithOutput ("du -kd0 " ++ fp)
+    let (n,_) = span isDigit txt
+    return $ read n
 
 
 ------------------------------------------------------------------------

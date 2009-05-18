@@ -25,7 +25,7 @@ executable cabal2macpkg
             filepath,
             hxt,
             pretty,
-            process == 1.0.1.0,
+            process,
             pureMD5 >= 0.2.1,
             regex-compat,
             split,
