@@ -52,7 +52,8 @@ main :: IO ()
 main = do
   opts <- getOptions
   bracket getTempDirectory
-          cleanupTempDirectory
+          --cleanupTempDirectory
+          (const $ return ())
           (runMain opts)
 
 

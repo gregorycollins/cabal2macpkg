@@ -65,9 +65,9 @@ makeMacPkg opts tmpdir pkgDesc = do
     createDirectories
 
     --------------------------------------------------------------------
-    buildPackageContents
+    hasPostFlight <- buildPackageContents
     setRootPrivileges
-    mkInfoFiles
+    mkInfoFiles hasPostFlight
     runPackageMaker
 
   where
@@ -132,23 +132,27 @@ makeMacPkg opts tmpdir pkgDesc = do
     makePostFlightScriptFile src dest = do
         fe <- doesFileExist src
         if not fe then
-            return ()
+            return False
           else do
             contents <- readFile src
             let output = "#!/bin/sh\n\
-                         \echo '" ++ contents ++ 
-                          "' | /usr/bin/env ghc-pkg --global update -"
+                         \/usr/bin/ghc-pkg --global update - <<EOF\n"
+                         ++ contents ++ "\nEOF\n"
             writeFile dest output
+            return True
 
 
     --------------------------------------------------------------------
     -- populate the packageinfo file in the resource directory
-    mkInfoFiles :: IO ()
-    mkInfoFiles = do
+    mkInfoFiles :: Bool -> IO ()
+    mkInfoFiles hasPf = do
         nf <- getNumFiles contentsDir
         kb <- getFileSizesInKB contentsDir
+
+        let pf = if hasPf then Just "postflight" else Nothing
+
         let pinfo = PackageInfo kb nf ("haskell."++pkgTitle)
-                                Nothing (Just "postinstall")
+                                Nothing pf
 
         writePackageInfo infoPath pinfo
 

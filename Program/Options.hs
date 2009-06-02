@@ -77,7 +77,7 @@ data Options = Options {
 
 defaultOptions :: Options
 defaultOptions = Options {
-    installPrefix          = Just "/"
+    installPrefix          = Just "/usr/local"
   , showUsage              = False
   , packageMakerPath       = Just "/Developer/usr/bin/packagemaker"
   , packageOutputDir       = Nothing

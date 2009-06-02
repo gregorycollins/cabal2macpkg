@@ -17,13 +17,13 @@ import Text.XML.HXT.Arrow
 ------------------------------------------------------------------------
 
 data InstallerScript = InstallerScript {
-      title        :: String
-    , background   :: Maybe String
-    , welcome      :: Maybe String
-    , readme       :: Maybe String
-    , license      :: Maybe String
-    , conclusion   :: Maybe String
-    , pkgFileNames :: [String]
+      is_title        :: String
+    , is_background   :: Maybe String
+    , is_welcome      :: Maybe String
+    , is_readme       :: Maybe String
+    , is_license      :: Maybe String
+    , is_conclusion   :: Maybe String
+    , is_pkgFileNames :: [(String,Int)]
 }
 
 
@@ -36,7 +36,9 @@ installerScript :: String           -- ^ package title
                 -> Maybe String     -- ^ readme blurb
                 -> Maybe String     -- ^ license blurb
                 -> Maybe String     -- ^ conclusion blurb
-                -> [String]         -- ^ list of .pkg files to include
+                -> [(String,Int)]   -- ^ list of .pkg files to
+                                    -- include, along with their
+                                    -- installed sizes
                 -> InstallerScript
 installerScript = InstallerScript
 
@@ -90,7 +92,7 @@ blurbAttrs = [ sattr "language" "en"
 
 ------------------------------------------------------------------------
 blurb :: (ArrowXml a) => String -> String -> a n XmlTree
-blurb tagName txt = mkelem tagName blurbAttrs [cdata txt]
+blurb tagName s = mkelem tagName blurbAttrs [cdata s]
 
 
 ------------------------------------------------------------------------
@@ -131,9 +133,9 @@ mkChoicesOutline choiceIds =
 
 ------------------------------------------------------------------------
 mkChoice :: (ArrowXml a) => String -> String -> String -> a n XmlTree
-mkChoice id title pkgref =
+mkChoice iD title pkgref =
     mkelem "choice"
-           [ sattr "id"            id
+           [ sattr "id"            iD
            , sattr "title"         title
            , sattr "start_visible" "false" ]
            [ mkelem "pkg-ref" [sattr "id" pkgref] [] ]
@@ -141,13 +143,13 @@ mkChoice id title pkgref =
 
 ------------------------------------------------------------------------
 mkPkgRef :: (ArrowXml a) => String -> String -> [Char] -> a n XmlTree
-mkPkgRef id installKBytes pkgFileName =
+mkPkgRef iD installKBytes pkgFileName =
     mkelem "pkg-ref"
-           [ sattr "id"            id
+           [ sattr "id"            iD
            , sattr "installKBytes" installKBytes
            , sattr "version"       ""
            , sattr "auth"          "Root" ]
-           [ txt $ "file:./Contents/Packages/" ++ pkgFileName ]
+           [ txt $ "#" ++ pkgFileName ]
 
 
 ------------------------------------------------------------------------
@@ -162,21 +164,21 @@ installerScriptHead body =
 mkInstallerScript :: (ArrowXml a) => InstallerScript -> a n XmlTree
 mkInstallerScript is =
     installerScriptHead $ concat [
-                              [ mkTitle (title is) ]
+                              [ mkTitle (is_title is) ]
                             , catMaybes [
-                                  (welcome is)    >>= Just . mkWelcome
-                                , (readme is)     >>= Just . mkReadme
-                                , (license is)    >>= Just . mkLicense
-                                , (conclusion is) >>= Just . mkConclusion ]
+                                  (is_welcome is)    >>= Just . mkWelcome
+                                , (is_readme is)     >>= Just . mkReadme
+                                , (is_license is)    >>= Just . mkLicense
+                                , (is_conclusion is) >>= Just . mkConclusion ]
                             , [ choicesOutline ]
                             , choices
                             , pkgRefs ]
   where
-    pkgFiles       = pkgFileNames is
+    pkgFiles       = is_pkgFileNames is
     n              = length pkgFiles
     choiceIds      = [ "choice" ++ (show i) | i <- [0..(n-1)] ]
     pkgRefIds      = [ "pkg"    ++ (show i) | i <- [0..(n-1)] ]
     choicesOutline = mkChoicesOutline choiceIds
     choices        = map (\(x,y) -> mkChoice x x y) (choiceIds `zip` pkgRefIds)
     -- FIXME: installKBytes should not be "0"!
-    pkgRefs        = map (\(x,y) -> mkPkgRef x "0" y) (pkgRefIds `zip` pkgFiles)
+    pkgRefs        = map (\(x,(f,sz)) -> mkPkgRef x (show sz) f) (pkgRefIds `zip` pkgFiles)

@@ -1,46 +1,41 @@
 {-# LANGUAGE BangPatterns #-}
 
--- | This module contains routines for making a mac .mpkg file from a
--- .cabal file's dependencies. Note that for right now (until this
--- program develops further) the intention is to do just enough to be
--- able to build an installer for the Haskell Platform
+-- | This module contains routines for making a mac distribution file
+-- from a .cabal file's dependencies. Note that for right now (until
+-- this program develops further) the intention is to do just enough
+-- to be able to build an installer for the Haskell Platform
 ------------------------------------------------------------------------
 
 module Program.MakeMetaPackage (runMakeMetaPkg)
 where
 
-import Control.Exception
-import Control.Monad
-
-import Data.Maybe
-import Data.Version
-
-import Distribution.Package
-import Distribution.PackageDescription
-import Distribution.PackageDescription.Configuration
-import Distribution.PackageDescription.Parse
-import Distribution.Simple.Utils hiding (intercalate)
-import Distribution.Verbosity as Verbosity
-import Distribution.Version
-
-import System.Directory
-import System.Environment
-import System.FilePath
-import System.FilePath.Glob
-import System.IO
-
+import           Control.Exception
+import           Control.Monad
 import qualified Data.ByteString.Lazy as B
-
-import Text.Regex
-
+import           Data.Maybe
+import           Data.Version
+import           Distribution.Package
+import           Distribution.PackageDescription
+import           Distribution.PackageDescription.Configuration
+import           Distribution.PackageDescription.Parse
+import           Distribution.Simple.Utils hiding (intercalate)
+import           Distribution.Verbosity as Verbosity
+import           Distribution.Version
+import           System.Directory
+import           System.Environment
+import           System.FilePath
+import           System.FilePath.Glob
+import           System.IO
+import           Text.Printf
+import           Text.Regex
 
 ------------------------------------------------------------------------
 -- local imports
 ------------------------------------------------------------------------
-import Distribution.OSX.InstallerScript
-import Program.MakePackage
-import Program.Options
-import Program.Util
+import           Distribution.OSX.InstallerScript
+import           Program.MakePackage
+import           Program.Options
+import           Program.Util
 
 
 ------------------------------------------------------------------------
@@ -57,7 +52,7 @@ checkDependenciesHaveExactVersions d =
 
 
 ------------------------------------------------------------------------
--- | Builds an OSX .mpkg based on a .cabal file
+-- | Builds an OSX distribution based on a .cabal file
 makeMacMetaPkg :: Options             -- ^ command-line options
                -> FilePath            -- ^ path to temp directory
                -> PackageDescription  -- ^ a parsed .cabal file
@@ -69,17 +64,16 @@ makeMacMetaPkg opts tmpdir pkgDesc = do
 
     outputPackageDir  <- makeAndCanonicalize $ fromMaybe cwd (packageOutputDir opts)
     outputPackagePath <- makeAndCanonicalize $
-                         fromMaybe (outputPackageDir </> computedPackageName)
+                         fromMaybe (outputPackageDir </> computedPackageFileName)
                                    (packageOutputFile opts)
 
-    contentsDir       <- makeAndCanonicalize $ outputPackagePath </> "Contents"
-    packagesDir       <- makeAndCanonicalize $ contentsDir </> "Packages"
+    contentsDir       <- makeAndCanonicalize $ tmpdir </> "Stage"
+    packagesDir       <- makeAndCanonicalize $ tmpdir </> "Packages"
 
     let subOptions = opts { packageOutputDir  = Just packagesDir
                           , packageOutputFile = Nothing }
 
-    (createDirectoryIfMissing True) `mapM_` [ outputPackagePath
-                                            , contentsDir
+    (createDirectoryIfMissing True) `mapM_` [ contentsDir
                                             , packagesDir ]
 
     mapM_ (buildOne subOptions) packagesToFetch
@@ -91,18 +85,31 @@ makeMacMetaPkg opts tmpdir pkgDesc = do
         maybe (return [])
               (\x -> do
                  files <- globPackages x
-                 mapM_ (copyTo outputPackagePath) files
+                 mapM_ (copyTo packagesDir) files
                  return (takeFileName `map` files))
               (extraPkgDir opts)
 
-    writeInstallerScript (contentsDir </> "distribution.dist") $
+
+    let allPackages = extraPackages ++ packageFileNames
+
+    -- FIXME: sizes bogus
+    sizes <- mapM (unXarToStaging packagesDir contentsDir) allPackages
+
+    -- write any Resources/ files (likely none), dump out
+    -- "Distribution" file, and xar up the results
+
+    -- FIXME: Resources/ (for background images)
+
+    writeInstallerScript (contentsDir </> "Distribution") $
       installerScript pkgTitle
                       Nothing   -- FIXME: populate these
                       Nothing
                       (Just pkgDescription)
                       Nothing
                       Nothing
-                      (extraPackages ++ packageFileNames)
+                      (allPackages `zip` sizes)
+
+    xarUpResults contentsDir outputPackagePath
 
   where
     --------------------------------------------------------------------
@@ -118,7 +125,7 @@ makeMacMetaPkg opts tmpdir pkgDesc = do
     pkgBaseName          = subRegex (mkRegex "[[:space:]]+") pkgTitle "_"
 
     --------------------------------------------------------------------
-    computedPackageName  = (pkgBaseName ++ "-" ++ pkgVersionString ++ ".mpkg")
+    computedPackageFileName = (pkgBaseName ++ "-" ++ pkgVersionString ++ ".pkg")
 
     deps = executableDeps opts ++ buildDepends pkgDesc
 
@@ -138,14 +145,51 @@ makeMacMetaPkg opts tmpdir pkgDesc = do
 
 
     --------------------------------------------------------------------
-    cabalFetch (pkgName,pkgVersion) = do
+    -- Actions
+    --------------------------------------------------------------------
+    unXarToStaging :: FilePath -> FilePath -> FilePath -> IO Int
+    unXarToStaging pkgPath outDir pkgFile = do
+        bracket
+          getCurrentDirectory
+          setCurrentDirectory
+          (\_ -> do
+             setCurrentDirectory outDir
+
+             let srcFile = pkgPath </> pkgFile
+             let destDir = outDir </> pkgFile
+
+             createDirectoryIfMissing True $ destDir
+             setCurrentDirectory $ destDir
+
+             putStrLn $ printf "un-xaring '%s' to '%s'..." srcFile destDir
+             putStrLn $ "------------------------------------------------------------------------"
+             hFlush stdout
+                              
+             runCmd "xar" ["-xvf", srcFile]
+             -- FIXME: parse PackageInfo
+             return 0)
+
+
+    --------------------------------------------------------------------
+    xarUpResults :: FilePath -> FilePath -> IO ()
+    xarUpResults staging outputFileName = do
+        bracket
+          getCurrentDirectory
+          setCurrentDirectory
+          (\_ -> do
+             setCurrentDirectory staging
+             runCmd "xar" ["-cvf", outputFileName, "."])
+
+
+    --------------------------------------------------------------------
+    cabalFetch (name,vers) = do
       -- FIXME: change this when cabal fetch takes an -o argument
       home <- getEnv "HOME"
 
-      let pkgbase = pkgName ++ "-" ++ pkgVersion
+      let pkgbase = name ++ "-" ++ vers
       let pkg     = pkgbase  ++ ".tar.gz"
       let pkgloc  = home </> ".cabal/packages/hackage.haskell.org/"
-                         </> pkgName </> pkgVersion </> pkg
+                         </> name </> vers </> pkg
 
       runCmd "cabal" ["fetch", pkgbase]
       fe <- doesFileExist pkgloc
@@ -158,9 +202,9 @@ makeMacMetaPkg opts tmpdir pkgDesc = do
 
 
     --------------------------------------------------------------------
-    buildOne opts (pkgName,pkgVersion) = do
+    buildOne opt (name,vers) = do
       putStrLn $ "\n" ++ (replicate 72 '-')
-      putStrLn $ "Making " ++ pkgName ++ "-" ++ pkgVersion
+      putStrLn $ "Making " ++ name ++ "-" ++ vers
       putStrLn $ replicate 72 '-'
       hFlush   stdout
 
@@ -174,8 +218,8 @@ makeMacMetaPkg opts tmpdir pkgDesc = do
 
             let workdir = td </> "work"
             createDirectoryIfMissing True workdir
-            cabalFetch (pkgName,pkgVersion)
-            runMakePackage opts workdir
+            cabalFetch (name,vers)
+            runMakePackage opt workdir
             )
 
     --------------------------------------------------------------------
@@ -186,9 +230,9 @@ makeMacMetaPkg opts tmpdir pkgDesc = do
 
 
 ------------------------------------------------------------------------
--- | globs a directory for .pkg and .mpkg files
+-- | globs a directory for .pkg files
 globPackages :: FilePath -> IO [FilePath]
-globPackages dir = namesMatching `mapM` ((dir </>) `map` ["*.pkg", "*.mpkg"])
+globPackages dir = namesMatching `mapM` ((dir </>) `map` ["*.pkg"])
                      >>= return . concat
 
 
@@ -217,4 +261,5 @@ runMakeMetaPkg opts tmpdir = do
 
 
 
+makeAndCanonicalize :: FilePath -> IO FilePath
 makeAndCanonicalize fp = createDirectoryIfMissing True fp >> canonicalizePath fp
