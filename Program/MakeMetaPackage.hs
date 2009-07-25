@@ -68,7 +68,7 @@ makeMacMetaPkg opts tmpdir pkgDesc = do
                                    (packageOutputFile opts)
 
     contentsDir       <- makeAndCanonicalize $ tmpdir </> "Stage"
-    packagesDir       <- makeAndCanonicalize $ tmpdir </> "Packages"
+    let packagesDir   =  outputPackagePath
 
     let subOptions = opts { packageOutputDir  = Just packagesDir
                           , packageOutputFile = Nothing }
@@ -89,27 +89,28 @@ makeMacMetaPkg opts tmpdir pkgDesc = do
                  return (takeFileName `map` files))
               (extraPkgDir opts)
 
+    return ()
 
-    let allPackages = extraPackages ++ packageFileNames
+    -- let allPackages = extraPackages ++ packageFileNames
 
-    -- FIXME: sizes bogus
-    sizes <- mapM (unXarToStaging packagesDir contentsDir) allPackages
+    -- -- FIXME: sizes bogus
+    -- sizes <- mapM (unXarToStaging packagesDir contentsDir) allPackages
 
-    -- write any Resources/ files (likely none), dump out
-    -- "Distribution" file, and xar up the results
+    -- -- write any Resources/ files (likely none), dump out
+    -- -- "Distribution" file, and xar up the results
 
-    -- FIXME: Resources/ (for background images)
+    -- -- FIXME: Resources/ (for background images)
 
-    writeInstallerScript (contentsDir </> "Distribution") $
-      installerScript pkgTitle
-                      Nothing   -- FIXME: populate these
-                      Nothing
-                      (Just pkgDescription)
-                      Nothing
-                      Nothing
-                      (allPackages `zip` sizes)
+    -- writeInstallerScript (contentsDir </> "Distribution") $
+    --   installerScript pkgTitle
+    --                   Nothing   -- FIXME: populate these
+    --                   Nothing
+    --                   (Just pkgDescription)
+    --                   Nothing
+    --                   Nothing
+    --                   (allPackages `zip` sizes)
 
-    xarUpResults contentsDir outputPackagePath
+    -- xarUpResults contentsDir outputPackagePath
 
   where
     --------------------------------------------------------------------
