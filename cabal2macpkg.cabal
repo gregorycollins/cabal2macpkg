@@ -1,5 +1,5 @@
 name:               cabal2macpkg
-version:            0.3
+version:            0.3.1
 homepage:           http://gregorycollins.net/
 synopsis:           Create OSX installation packages from Cabal packages
 description:        Create OSX installation packages from Cabal packages

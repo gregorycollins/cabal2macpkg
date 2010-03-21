@@ -118,9 +118,9 @@ makeMacPkg opts tmpdir pkgDesc = do
     --------------------------------------------------------------------
     -- uses cabal to build the package into the work area
     buildPackageContents = do
-        runSetup   "configure" ["--global", "--prefix="++prefix]
+        runSetup   "configure" ["--global", "--prefix="++prefix, "-p"]
         runSetup   "build"     []
-        runSetup   "haddock"   []
+        runSetup   "haddock"   ["--hyperlink-source"]
         runSetup   "copy"      ["--destdir=" ++ contentsDir]
         runSetup   "register"  ["--gen-pkg-config=" ++ temporaryPkgConfig]
 
@@ -198,7 +198,7 @@ makeMacPkg opts tmpdir pkgDesc = do
              -> [String]        -- ^ additional arguments
              -> IO ()
     runSetup cmd args =
-        runCmd "runghc" $ ["Setup", cmd] ++ mkOpts args
+        runCmd "cabal" $ [cmd] ++ mkOpts args
       where
         mkOpts s = s ++ ["--builddir=" ++ cabalBuildDir]
 

@@ -72,45 +72,50 @@ data Options = Options {
                                          -- for .pkg and .mpkg files in the
                                          -- directory, and plop them into the
                                          -- .mpkg file we generate
+
+    , areProfiling :: Bool
     } deriving (Eq, Show)
 
 
 defaultOptions :: Options
 defaultOptions = Options {
-    installPrefix          = Just "/usr/local"
-  , showUsage              = False
-  , packageMakerPath       = Just "/Developer/usr/bin/packagemaker"
-  , packageOutputDir       = Nothing
-  , packageOutputFile      = Nothing
-  , areBuildingMetaPackage = False
-  , executableDeps         = []
-  , extraPkgDir            = Nothing
-  }
+                   installPrefix          = Just "/usr/local"
+                 , showUsage              = False
+                 , packageMakerPath       = Just "/Developer/usr/bin/packagemaker"
+                 , packageOutputDir       = Nothing
+                 , packageOutputFile      = Nothing
+                 , areBuildingMetaPackage = False
+                 , executableDeps         = []
+                 , extraPkgDir            = Nothing
+                 , areProfiling           = False
+                 }
 
 
 instance Monoid Options where
-    mempty = Options {
-        installPrefix          = Nothing
-      , showUsage              = False
-      , packageMakerPath       = Nothing
-      , packageOutputDir       = Nothing
-      , packageOutputFile      = Nothing
-      , areBuildingMetaPackage = False
-      , executableDeps         = []
-      , extraPkgDir            = Nothing
-      }
+    mempty = Options
+             { installPrefix          = Nothing
+             , showUsage              = False
+             , packageMakerPath       = Nothing
+             , packageOutputDir       = Nothing
+             , packageOutputFile      = Nothing
+             , areBuildingMetaPackage = False
+             , executableDeps         = []
+             , extraPkgDir            = Nothing
+             , areProfiling           = False
+             }
 
     a `mappend` b =
         Options {
-              installPrefix          = override installPrefix
-            , packageMakerPath       = override packageMakerPath
-            , packageOutputDir       = override packageOutputDir
-            , packageOutputFile      = override packageOutputFile
-            , showUsage              = showUsage a || showUsage b
-            , areBuildingMetaPackage = areBuildingMetaPackage a
-                                         || areBuildingMetaPackage b
-            , executableDeps         = addUp executableDeps
-            , extraPkgDir            = override extraPkgDir
+            installPrefix          = override installPrefix
+          , packageMakerPath       = override packageMakerPath
+          , packageOutputDir       = override packageOutputDir
+          , packageOutputFile      = override packageOutputFile
+          , showUsage              = showUsage a || showUsage b
+          , areBuildingMetaPackage = areBuildingMetaPackage a
+                                     || areBuildingMetaPackage b
+          , executableDeps         = addUp executableDeps
+          , extraPkgDir            = override extraPkgDir
+          , areProfiling           = areProfiling a || areProfiling b
           }
       where
         -- monoid append using "Last" behaviour
@@ -134,7 +139,13 @@ optionFlags = [ GetOpt.Option
                   "m"
                   ["meta"]
                   (GetOpt.NoArg $ mempty {areBuildingMetaPackage=True})
-                  "output install package to the given file"
+                  "build a metapackage"
+
+              , GetOpt.Option
+                  "p"
+                  ["profiling"]
+                  (GetOpt.NoArg $ mempty {areProfiling=True})
+                  "build using profiling support"
 
               , GetOpt.Option
                   ""
