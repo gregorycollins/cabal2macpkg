@@ -118,7 +118,8 @@ makeMacPkg opts tmpdir pkgDesc = do
     --------------------------------------------------------------------
     -- uses cabal to build the package into the work area
     buildPackageContents = do
-        runSetup   "configure" ["--global", "--prefix="++prefix, "-p"]
+        runSetup   "configure" [ "--global", "--prefix="++prefix, "-p"
+                               , "--ld-options=-macosx_version_min 10.5" ]
         runSetup   "build"     []
         runSetup   "haddock"   ["--hyperlink-source"]
         runSetup   "copy"      ["--destdir=" ++ contentsDir]
@@ -178,6 +179,8 @@ makeMacPkg opts tmpdir pkgDesc = do
                                , outputPackagePath
                                , "--root"
                                , contentsDir
+                               , "--id"
+                               , ("haskell." ++ pkgTitle)
                                , "--scripts"
                                , scriptsDir
                                , "--target"
